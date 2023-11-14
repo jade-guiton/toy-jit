@@ -18,6 +18,7 @@ use nom::{
 enum Arg {
 	Nil,
 	ImmI(u8), ImmU(u8),
+	Rel32,
 	Reg64, RegOrMem64,
 }
 
@@ -51,6 +52,7 @@ fn parse_arg(input: &str) -> IResult<&str, Arg> {
 	return map(opt(alt((
 		map(preceded(char('u'), bit_cnt), |n| Arg::ImmU(n)),
 		map(preceded(char('i'), bit_cnt), |n| Arg::ImmI(n)),
+		value(Arg::Rel32, tag("rel32")),
 		value(Arg::Reg64, tag("r64")),
 		value(Arg::RegOrMem64, tag("r/m64")),
 	))), |o| o.unwrap_or(Arg::Nil))(input);
@@ -95,7 +97,7 @@ fn main() {
 	
 	let mut mnems: HashMap<Box<str>, Vec<Variant>> = HashMap::new();
 	for opt in variants {
-		if let Some((mnem, mut var)) = opt {
+		if let Some((mnem, var)) = opt {
 			if let Some(vars) = mnems.get_mut(&mnem) {
 				vars.push(var);
 			} else {
@@ -104,13 +106,11 @@ fn main() {
 		}
 	}
 	
-	println!("mnems = {:?}", mnems);
-	
 	let out_dir = env::var_os("OUT_DIR").unwrap();
 	let out_path = Path::new(&out_dir).join("ops.rs");
 	let mut out = File::create(out_path).expect("could not create ops.rs");
 	
-	write!(out, "#[allow(dead_code)]\n").unwrap();
+	write!(out, "#[allow(dead_code, unreachable_patterns)]\n").unwrap();
 	write!(out, "impl Assembler {{\n").unwrap();
 	for (mnem, vars) in mnems {
 		write!(out, "  pub fn op_{}(&mut self, a1: Arg, a2: Arg) {{\n", mnem).unwrap();
@@ -127,17 +127,17 @@ fn main() {
 					match var.args[j] {
 						Arg::Nil => write!(out, "Arg::Nil").unwrap(),
 						Arg::ImmI(size) => {
-							write!(out, "Arg::ImmI(imm)").unwrap();
+							write!(out, "Arg::Imm(imm)").unwrap();
 							imm = Some(Arg::ImmI(size));
 							if size < 64 {
 								guard = format!("if imm >= i{}::MIN as i64 && imm <= i{}::MAX as i64 ", size, size);
 							}
 						},
 						Arg::ImmU(size) => {
-							write!(out, "Arg::ImmU(imm)").unwrap();
+							write!(out, "Arg::Imm(imm)").unwrap();
 							imm = Some(Arg::ImmU(size));
 							if size < 64 {
-								guard = format!("if imm <= u{}::MAX as u64 ", size);
+								guard = format!("if imm >= 0 && imm <= u{}::MAX as i64 ", size);
 							}
 						},
 						Arg::Reg64 => write!(out, "Arg::Reg(reg)").unwrap(),
@@ -148,7 +148,10 @@ fn main() {
 								write!(out, "Arg::Reg(rm)").unwrap();
 							}
 						},
-						_ => unreachable!()
+						Arg::Rel32 => {
+							write!(out, "Arg::Lbl(lbl)").unwrap();
+							imm = Some(Arg::Rel32);
+						},
 					}
 				}
 				write!(out, ") {}=> {{\n", guard).unwrap();
@@ -183,15 +186,16 @@ fn main() {
 						write!(out, "        }} else if mode == 0b10 {{\n").unwrap();
 						write!(out, "          self.buf.push_i32(off);\n").unwrap();
 						write!(out, "        }}\n").unwrap();
+						write!(out, "        if rm == Reg::RSP {{\n").unwrap();
+						write!(out, "          self.buf.push_u8(sib(0, Reg::RSP as u8, rm as u8));\n").unwrap();
+						write!(out, "        }}\n").unwrap();
 					}
-					write!(out, "        if rm == Reg::RSP {{\n").unwrap();
-					write!(out, "          self.buf.push_u8(sib(0, Reg::RSP as u8, rm as u8));\n").unwrap();
-					write!(out, "        }}\n").unwrap();
 				}
 				
 				match imm {
 					Some(Arg::ImmU(size)) => write!(out, "        self.buf.push_u{}(imm as u{});\n", size, size).unwrap(),
 					Some(Arg::ImmI(size)) => write!(out, "        self.buf.push_i{}(imm as i{});\n", size, size).unwrap(),
+					Some(Arg::Rel32) => write!(out, "        self.ref_lbl(lbl);\n").unwrap(),
 					None => {},
 					_ => unreachable!(),
 				}

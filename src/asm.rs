@@ -11,17 +11,20 @@ pub struct Assembler {
 	labels: Vec<LabelState>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reg {
 	RAX = 0, RCX, RDX, RBX, RSP, RBP, RSI, RDI
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Arg {
 	Nil,
-	ImmU(u64), ImmI(i64),
+	Imm(i64),
 	Reg(Reg),
 	IndReg(Reg, i32),
+	Lbl(Label),
 }
 
 impl Assembler {
@@ -29,9 +32,19 @@ impl Assembler {
 		Self { buf: MmapVec::new(), labels: vec![] }
 	}
 	
+	pub fn get_label_idx(&self, lbl: Label) -> usize {
+		if let LabelState::Defined(idx) = self.labels[lbl] {
+			idx
+		} else {
+			panic!("trying to get index of undefined assembler label");
+		}
+	}
+	
 	pub fn finish(self) -> ExecBox {
 		for lbl_st in &self.labels {
-			assert!(!matches!(lbl_st, LabelState::Forward(_)), "undefined assembler label");
+			if let LabelState::Forward(refs) = lbl_st {
+				assert!(refs.len() == 0, "assembler label is referenced but not defined");
+			}
 		}
 		self.buf.make_exec()
 	}
@@ -64,6 +77,7 @@ impl Assembler {
 			LabelState::Defined(to) => self.buf.write_rel32(at, *to),
 		}
 	}
+	
 	pub fn set_lbl(&mut self, lbl: Label) {
 		let to = self.buf.len();
 		match &self.labels[lbl] {

@@ -5,8 +5,6 @@ use std::ptr::null_mut;
 use nix::sys::mman::*;
 use nix::unistd::sysconf;
 
-use crate::asm::Label;
-
 pub struct MmapVec {
 	ptr: *mut nix::libc::c_void,
 	page_size: usize,
@@ -72,7 +70,6 @@ impl MmapVec {
 	pub fn push_u16(&mut self, x: u16) { self.push_bytes(x.to_le_bytes()); }
 	pub fn push_u32(&mut self, x: u32) { self.push_bytes(x.to_le_bytes()); }
 	pub fn push_i32(&mut self, x: i32) { self.push_bytes(x.to_le_bytes()); }
-	pub fn push_u64(&mut self, x: u64) { self.push_bytes(x.to_le_bytes()); }
 	pub fn push_i64(&mut self, x: i64) { self.push_bytes(x.to_le_bytes()); }
 	
 	pub fn write_rel32(&mut self, at: usize, to: usize) {
@@ -87,9 +84,9 @@ impl MmapVec {
 }
 
 impl ExecBox {
-	pub fn get_label(&self, lbl: Label) -> *const nix::libc::c_void {
-		assert!(lbl <= self.len);
-		unsafe { self.ptr.offset(lbl as isize) }
+	pub fn get_idx(&self, idx: usize) -> *const nix::libc::c_void {
+		assert!(idx <= self.len);
+		unsafe { self.ptr.offset(idx as isize) }
 	}
 }
 
