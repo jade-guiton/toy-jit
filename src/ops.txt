@@ -1,0 +1,20 @@
+call	i32			E8
+ret				C3
+ret	u16			C2
+				
+int3				CC
+				
+mov	r64	u32		B8+rd
+mov	r64	u64	W	B8+rd
+mov	r/m64	r64	W	89
+					
+add	r/m64	i32	W	81/0
+add	r/m64	r64	W	01
+sub	r/m64	i32	W	81/5
+					
+push	i8			6A
+push	i32			68
+push	r64			50+rd
+push	r/m64			FF/6
+pop	r64			58+rd
+pop	r/m64			8F/0

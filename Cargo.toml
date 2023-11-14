@@ -1,0 +1,13 @@
+[package]
+name = "rust-jit"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+ahash = "0.8"
+nix = { version = "0.27", features = ["mman", "feature"] }
+
+[build-dependencies]
+nom = "7.1"
+nom-supreme = "0.8.0"
+
