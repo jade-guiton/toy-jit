@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 ahash = "0.8"
-nix = { version = "0.27", features = ["mman", "feature"] }
+nix = { version = "0.27", features = ["mman", "feature", "signal"] }
 
 [build-dependencies]
 nom = "7.1"

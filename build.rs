@@ -86,9 +86,9 @@ fn main() {
 	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=src/ops.txt");
 	
-	let in_path = Path::new("./src/ops.txt");
-	let ops_txt = fs::read(in_path).expect("could not read ops.txt");
-	let ops_txt = std::str::from_utf8(&ops_txt).expect("ops.txt is not valid utf-8");
+	let in_path = Path::new("./src/ops_x64.txt");
+	let ops_txt = fs::read(in_path).expect("could not read ops_x64.txt");
+	let ops_txt = std::str::from_utf8(&ops_txt).expect("ops_x64.txt is not valid utf-8");
 	
 	let (_, variants) = all_consuming(many0(alt((
 		map(parse_variant, Some),
@@ -107,7 +107,7 @@ fn main() {
 	}
 	
 	let out_dir = env::var_os("OUT_DIR").unwrap();
-	let out_path = Path::new(&out_dir).join("ops.rs");
+	let out_path = Path::new(&out_dir).join("ops_x64.rs");
 	let mut out = File::create(out_path).expect("could not create ops.rs");
 	
 	write!(out, "#[allow(dead_code, unreachable_patterns)]\n").unwrap();

@@ -36,7 +36,7 @@ impl Assembler {
 		if let LabelState::Defined(idx) = self.labels[lbl] {
 			idx
 		} else {
-			panic!("trying to get index of undefined assembler label");
+			panic!("trying to locate undefined assembler label");
 		}
 	}
 	
@@ -47,20 +47,6 @@ impl Assembler {
 			}
 		}
 		self.buf.make_exec()
-	}
-	
-	pub fn dbg(&self) {
-		println!("Assembler.buf: [");
-		for line in 0..self.buf.len()/8 + 1 {
-			print!("  ");
-			for col in 0..8 {
-				let i = line*8 + col;
-				if i >= self.buf.len() { break; }
-				print!("{:02x} ", self.buf[i]);
-			}
-			println!();
-		}
-		println!("]");
 	}
 	
 	pub fn new_lbl(&mut self) -> Label {
@@ -101,4 +87,4 @@ fn sib(scale: u8, idx: u8, base: u8) -> u8 {
 	(scale << 6) | (idx << 3) | base
 }
 
-include!(concat!(env!("OUT_DIR"), "/ops.rs"));
+include!(concat!(env!("OUT_DIR"), "/ops_x64.rs"));
