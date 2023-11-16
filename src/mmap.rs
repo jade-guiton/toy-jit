@@ -84,9 +84,9 @@ impl MmapVec {
 }
 
 impl ExecBox {
-	pub fn get_idx(&self, idx: usize) -> *const nix::libc::c_void {
-		assert!(idx <= self.len);
-		unsafe { self.ptr.offset(idx as isize) }
+	pub fn get_off(&self, off: usize) -> *const nix::libc::c_void {
+		assert!(off <= self.len);
+		unsafe { self.ptr.offset(off as isize) }
 	}
 }
 

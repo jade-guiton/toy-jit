@@ -40,7 +40,7 @@ impl Assembler {
 		}
 	}
 	
-	pub fn finish(self) -> ExecBox {
+	pub fn finalize(self) -> ExecBox {
 		for lbl_st in &self.labels {
 			if let LabelState::Forward(refs) = lbl_st {
 				assert!(refs.len() == 0, "assembler label is referenced but not defined");
@@ -49,13 +49,13 @@ impl Assembler {
 		self.buf.make_exec()
 	}
 	
-	pub fn new_lbl(&mut self) -> Label {
+	pub fn new_label(&mut self) -> Label {
 		let lbl = self.labels.len() as Label;
 		self.labels.push(LabelState::Forward(vec![]));
 		lbl
 	}
 	
-	fn ref_lbl(&mut self, lbl: Label) {
+	fn ref_label(&mut self, lbl: Label) {
 		let at = self.buf.len();
 		self.buf.push_i32(0); // placeholder
 		match &mut self.labels[lbl] {
@@ -64,7 +64,7 @@ impl Assembler {
 		}
 	}
 	
-	pub fn set_lbl(&mut self, lbl: Label) {
+	pub fn set_label(&mut self, lbl: Label) {
 		let to = self.buf.len();
 		match &self.labels[lbl] {
 			LabelState::Forward(refs) => {

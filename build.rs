@@ -195,7 +195,7 @@ fn main() {
 				match imm {
 					Some(Arg::ImmU(size)) => write!(out, "        self.buf.push_u{}(imm as u{});\n", size, size).unwrap(),
 					Some(Arg::ImmI(size)) => write!(out, "        self.buf.push_i{}(imm as i{});\n", size, size).unwrap(),
-					Some(Arg::Rel32) => write!(out, "        self.ref_lbl(lbl);\n").unwrap(),
+					Some(Arg::Rel32) => write!(out, "        self.ref_label(lbl);\n").unwrap(),
 					None => {},
 					_ => unreachable!(),
 				}

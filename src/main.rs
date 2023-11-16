@@ -1,8 +1,12 @@
-use backend_x64::Backend;
+use ast::{Pos, NodePos, Node};
+use compiler::Compiler;
+use inlinable_string::InlinableString;
 
 mod mmap;
-mod asm_x64;
-mod backend_x64;
+mod asm;
+mod backend;
+mod compiler;
+mod ast;
 
 extern fn nop(_: nix::libc::c_int) {}
 
@@ -11,6 +15,7 @@ fn main() {
 	unsafe { nix::sys::signal::signal(nix::sys::signal::SIGTRAP, nix::sys::signal::SigHandler::Handler(nop)) }
 		.expect("signal()");
 	
+	/*
 	let mut back = Backend::new();
 	
 	let add_gbl = back.get_global("add");
@@ -39,8 +44,51 @@ fn main() {
 	let entry_idx = back.get_label_offset(entry_gbl);
 	let code = back.finalize();
 	let entry: extern "sysv64" fn() -> i32 = unsafe {
-		std::mem::transmute(code.get_idx(entry_idx))
+		std::mem::transmute(code.get_off(entry_idx))
 	};
 	let res = entry();
+	*/
+	
+	let mut comp = Compiler::new();
+	let def_pos = Pos { line: 0, col: 0, file: "<test>".to_owned().into() };
+	
+	comp.compile_fn(&NodePos(Node::Fn {
+		name: "add".into(),
+		args: vec![
+			(InlinableString::from("a"), Node::Sym(InlinableString::from("int"))),
+			(InlinableString::from("b"), Node::Sym(InlinableString::from("int"))),
+		],
+		ret: Some(Box::new(NodePos(Node::Sym(InlinableString::from("int")), def_pos.clone()))),
+		body: vec![
+			NodePos(Node::Ret(Some(Box::new(
+				NodePos(Node::Plus(
+					Box::new(NodePos(Node::Id(InlinableString::from("a")), def_pos.clone())),
+					Box::new(NodePos(Node::Id(InlinableString::from("b")), def_pos.clone())),
+				), def_pos.clone())
+			))), def_pos.clone())
+		]
+	}, def_pos.clone())).unwrap();
+	
+	comp.compile_fn(&NodePos(Node::Fn {
+		name: "main".into(),
+		args: vec![],
+		ret: Some(Box::new(NodePos(Node::Sym(InlinableString::from("int")), def_pos.clone()))),
+		body: vec![
+			NodePos(Node::Ret(Some(Box::new(
+				NodePos(Node::Call {
+					func: Box::new(NodePos(Node::Id(InlinableString::from("add")), def_pos.clone())),
+					args: vec![
+						NodePos(Node::Int(23), def_pos.clone()),
+						NodePos(Node::Int(45), def_pos.clone()),
+					],
+				}, def_pos.clone())
+			))), def_pos.clone())
+		]
+	}, def_pos.clone())).unwrap();
+	
+	let code = comp.finalize().unwrap();
+	
+	let res = (code.entry)();
+	
 	std::process::exit(res);
 }

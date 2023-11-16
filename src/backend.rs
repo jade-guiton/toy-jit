@@ -1,6 +1,7 @@
 use ahash::{HashMap, HashMapExt};
+use inlinable_string::InlinableString;
 
-use crate::{asm_x64::{Assembler, Reg, Arg, Label}, mmap::ExecBox};
+use crate::{asm::{Assembler, Reg, Arg, Label}, mmap::ExecBox};
 
 struct FnState {
 	ret_slots: u16,
@@ -11,7 +12,7 @@ struct FnState {
 
 pub struct Backend {
 	asm: Assembler,
-	globals: HashMap<Box<str>, Label>,
+	globals: HashMap<InlinableString, Label>,
 	cur_fn: Option<FnState>,
 }
 
@@ -21,14 +22,14 @@ impl Backend {
 	}
 	
 	pub fn finalize(self) -> ExecBox {
-		self.asm.finish()
+		self.asm.finalize()
 	}
 	
 	pub fn get_global(&mut self, name: &str) -> Label {
 		if let Some(lbl) = self.globals.get(name) {
 			*lbl
 		} else {
-			let lbl = self.asm.new_lbl();
+			let lbl = self.asm.new_label();
 			self.globals.insert(name.into(), lbl);
 			lbl
 		}
@@ -39,7 +40,7 @@ impl Backend {
 	
 	pub fn begin_fn(&mut self, lbl: Label, arg_slots: u16, ret_slots: u16) {
 		assert!(self.cur_fn.is_none(), "current function not finished");
-		self.asm.set_lbl(lbl);
+		self.asm.set_label(lbl);
 		// prologue
 		self.asm.op_push(Arg::Reg(Reg::RBP), Arg::Nil);
 		self.asm.op_mov(Arg::Reg(Reg::RBP), Arg::Reg(Reg::RSP));
@@ -68,7 +69,7 @@ impl Backend {
 	
 	pub fn gen_c_entry(&mut self, lbl: Label, main_fn: Label) {
 		assert!(self.cur_fn.is_none(), "current function not finished");
-		self.asm.set_lbl(lbl);
+		self.asm.set_label(lbl);
 		self.asm.op_int3(Arg::Nil, Arg::Nil);
 		self.asm.op_push(Arg::Reg(Reg::RBP), Arg::Nil); // SysV64 prologue
 		self.asm.op_sub(Arg::Reg(Reg::RSP), Arg::Imm(8)); // 1 return slot
