@@ -84,7 +84,7 @@ fn parse_variant(input: &str) -> IResult<&str, (Box<str>, Variant)> {
 
 fn main() {
 	println!("cargo:rerun-if-changed=build.rs");
-	println!("cargo:rerun-if-changed=src/ops.txt");
+	println!("cargo:rerun-if-changed=src/ops_x64.txt");
 	
 	let in_path = Path::new("./src/ops_x64.txt");
 	let ops_txt = fs::read(in_path).expect("could not read ops_x64.txt");

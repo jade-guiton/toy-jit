@@ -1,0 +1,7 @@
+fn add(x int, y int) int {
+	ret x + y + 4;
+}
+
+fn main() int {
+	ret add(2, 3);
+}

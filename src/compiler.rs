@@ -4,7 +4,13 @@ use std::{rc::Rc, cell::RefCell};
 use ahash::{HashMap, HashMapExt};
 use inlinable_string::InlinableString;
 
-use crate::{backend::Backend, asm::Label, ast::{Node, NodePos, Pos}, mmap::ExecBox};
+use crate::{
+	backend::Backend,
+	asm::Label,
+	ast::{Node, NodePos, CompilationError, at, CompilerResult},
+	mmap::ExecBox,
+	format_err_nowhere, format_err
+};
 
 #[derive(Clone)]
 enum Location {
@@ -80,50 +86,6 @@ impl Scope {
 	}
 }
 
-pub struct CompilationError {
-	msg: String,
-	pos: Option<Pos>,
-}
-
-impl CompilationError {
-	fn nowhere(msg: String) -> Self {
-		CompilationError { msg, pos: None }
-	}
-}
-
-impl std::fmt::Debug for CompilationError {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		if let Some(pos) = &self.pos {
-			f.write_fmt(format_args!("compilation error at {:?}: {}", pos, self.msg))
-		} else {
-			f.write_fmt(format_args!("compilation error: {}", self.msg))
-		}
-	}
-}
-
-macro_rules! format_err {
-	($pos:expr, $($arg:tt)*) => {{
-		Err(CompilationError {
-			msg: format!($($arg)*),
-			pos: Some($pos.clone()),
-		})
-	}};
-}
-macro_rules! format_err_nowhere {
-	($($arg:tt)*) => {{
-		Err(CompilationError {
-			msg: format!($($arg)*),
-			pos: None,
-		})
-	}};
-}
-
-type CompilerResult<T> = Result<T, CompilationError>;
-
-fn at<T, E: std::error::Error>(res: Result<T, E>, pos: Pos) -> CompilerResult<T> {
-	res.map_err(|err| CompilationError { msg: err.to_string(), pos: Some(pos) })
-}
-
 pub struct CompilerOutput {
 	_mem: ExecBox,
 	pub entry: extern "sysv64" fn() -> i32
@@ -174,9 +136,7 @@ impl Compiler {
 	
 	fn resolve_ty(&self, node: &Node) -> Type {
 		match node {
-			Node::Sym(sym) if sym == "int" => {
-				Type::Int
-			},
+			Node::IntType => Type::Int,
 			_ => unreachable!(),
 		}
 	}
@@ -194,7 +154,7 @@ impl Compiler {
 	fn compile_expr(&mut self, np: &NodePos, sc: &Scope) -> CompilerResult<Option<Value>> {
 		let NodePos(node, pos) = np;
 		match node {
-			Node::Int(val) => {
+			Node::IntLit(val) => {
 				Ok(Some(Value(Location::Const(*val), Type::Int)))
 			},
 			Node::Id(id) => {
@@ -286,7 +246,7 @@ impl Compiler {
 					let arg_loc = Location::Arg(at(i.try_into(), pos.clone())?);
 					scope.borrow_mut().put(arg_name, Value(arg_loc, arg_ty));
 				}
-				let ret_ty = ret.as_ref().map(|n| self.resolve_ty(&n.0));
+				let ret_ty = ret.as_ref().map(|n| self.resolve_ty(&n));
 				
 				let fn_ty = Type::Fn { args: args_ty.into_boxed_slice(), ret: ret_ty.clone().map(Box::new) };
 				let fn_lbl = self.back.get_global(name);

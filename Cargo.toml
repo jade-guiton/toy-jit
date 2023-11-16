@@ -7,6 +7,8 @@ edition = "2021"
 ahash = "0.8"
 inlinable_string = "0.1.15"
 nix = { version = "0.27", features = ["mman", "feature", "signal"] }
+num_enum = "0.7.1"
+unicode-xid = "0.2.4"
 
 [build-dependencies]
 nom = "7.1"

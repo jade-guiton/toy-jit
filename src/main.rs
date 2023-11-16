@@ -1,12 +1,12 @@
-use ast::{Pos, NodePos, Node};
 use compiler::Compiler;
-use inlinable_string::InlinableString;
+use parser::Parser;
 
 mod mmap;
 mod asm;
 mod backend;
 mod compiler;
 mod ast;
+mod parser;
 
 extern fn nop(_: nix::libc::c_int) {}
 
@@ -15,78 +15,45 @@ fn main() {
 	unsafe { nix::sys::signal::signal(nix::sys::signal::SIGTRAP, nix::sys::signal::SigHandler::Handler(nop)) }
 		.expect("signal()");
 	
-	/*
-	let mut back = Backend::new();
+	let mut args = std::env::args();
+	if args.len() != 2 {
+		eprintln!("expected 1 command line argument: file path");
+		std::process::exit(1);
+	}
 	
-	let add_gbl = back.get_global("add");
-	let main_gbl = back.get_global("main");
-	let entry_gbl = back.get_global("_start");
+	args.next();
+	let path = args.next().unwrap();
 	
-	back.begin_fn(add_gbl, 2, 1);
-	back.push_arg(0);
-	back.push_arg(1);
-	back.add();
-	back.pop_ret(0);
-	back.ret();
-	back.end_fn();
-	
-	back.begin_fn(main_gbl, 0, 1);
-	back.precall(1);
-	back.push_imm(23);
-	back.push_imm(45);
-	back.call(add_gbl, 2, 1);
-	back.pop_ret(0);
-	back.ret();
-	back.end_fn();
-	
-	back.gen_c_entry(entry_gbl, main_gbl);
-	
-	let entry_idx = back.get_label_offset(entry_gbl);
-	let code = back.finalize();
-	let entry: extern "sysv64" fn() -> i32 = unsafe {
-		std::mem::transmute(code.get_off(entry_idx))
+	let file = match std::fs::read_to_string(&path) {
+		Ok(file) => file,
+		Err(err) => {
+			eprintln!("error reading file: {:?}", err);
+			std::process::exit(1);
+		}
 	};
-	let res = entry();
-	*/
+	
+	let ast = match Parser::parse_program(path, &file) {
+		Ok(ast) => ast,
+		Err(err) => {
+			eprintln!("syntax error: {}", err);
+			std::process::exit(1);
+		}
+	};
 	
 	let mut comp = Compiler::new();
-	let def_pos = Pos { line: 0, col: 0, file: "<test>".to_owned().into() };
-	
-	comp.compile_fn(&NodePos(Node::Fn {
-		name: "add".into(),
-		args: vec![
-			(InlinableString::from("a"), Node::Sym(InlinableString::from("int"))),
-			(InlinableString::from("b"), Node::Sym(InlinableString::from("int"))),
-		],
-		ret: Some(Box::new(NodePos(Node::Sym(InlinableString::from("int")), def_pos.clone()))),
-		body: vec![
-			NodePos(Node::Ret(Some(Box::new(
-				NodePos(Node::Plus(
-					Box::new(NodePos(Node::Id(InlinableString::from("a")), def_pos.clone())),
-					Box::new(NodePos(Node::Id(InlinableString::from("b")), def_pos.clone())),
-				), def_pos.clone())
-			))), def_pos.clone())
-		]
-	}, def_pos.clone())).unwrap();
-	
-	comp.compile_fn(&NodePos(Node::Fn {
-		name: "main".into(),
-		args: vec![],
-		ret: Some(Box::new(NodePos(Node::Sym(InlinableString::from("int")), def_pos.clone()))),
-		body: vec![
-			NodePos(Node::Ret(Some(Box::new(
-				NodePos(Node::Call {
-					func: Box::new(NodePos(Node::Id(InlinableString::from("add")), def_pos.clone())),
-					args: vec![
-						NodePos(Node::Int(23), def_pos.clone()),
-						NodePos(Node::Int(45), def_pos.clone()),
-					],
-				}, def_pos.clone())
-			))), def_pos.clone())
-		]
-	}, def_pos.clone())).unwrap();
-	
-	let code = comp.finalize().unwrap();
+	for fn_node in ast {
+		if let Err(err) = comp.compile_fn(&fn_node) {
+			eprintln!("compilation error: {}", err);
+			std::process::exit(1);
+		}
+	}
+	let code = match comp.finalize() {
+		Ok(code) => code,
+		Err(err) => {
+			eprintln!("compilation error: {}", err);
+			std::process::exit(1);
+		}
+	};
 	
 	let res = (code.entry)();
 	
