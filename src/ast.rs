@@ -15,20 +15,35 @@ impl std::fmt::Debug for Pos {
 	}
 }
 
+#[derive(Clone, Copy)]
+pub enum BinCompOp {
+	LE,
+}
+#[derive(Clone, Copy)]
+pub enum BinArithOp {
+	Plus,
+	Minus,
+}
+
 pub enum Node {
 	Fn {
 		name: InlinableString,
 		args: Vec<(InlinableString, Node)>,
 		ret: Option<Box<Node>>,
-		body: Vec<NodePos>,
+		body: Block,
 	},
 	IntType,
+	If {
+		if_br: Vec<(NodePos, Block)>,
+		else_br: Option<Block>,
+	},
 	Ret(Option<Box<NodePos>>),
 	Call {
 		func: Box<NodePos>,
 		args: Vec<NodePos>,
 	},
-	Plus(Box<NodePos>, Box<NodePos>),
+	BinComp(BinCompOp, Box<NodePos>, Box<NodePos>),
+	BinArith(BinArithOp, Box<NodePos>, Box<NodePos>),
 	Id(InlinableString),
 	IntLit(i64),
 	Sym(InlinableString),
@@ -37,6 +52,8 @@ pub enum Node {
 }
 
 pub struct NodePos(pub Node, pub Pos);
+
+pub type Block = Vec<NodePos>;
 
 pub struct CompilationError {
 	msg: String,

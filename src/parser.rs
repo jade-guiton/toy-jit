@@ -2,7 +2,7 @@ use inlinable_string::InlinableString;
 use num_enum::TryFromPrimitive;
 use unicode_xid::UnicodeXID;
 
-use crate::{ast::{CompilationError, CompilerResult, Node, Pos, NodePos}, format_err};
+use crate::{ast::{CompilationError, CompilerResult, Node, Pos, NodePos, Block, BinCompOp, BinArithOp}, format_err};
 
 pub struct Parser<'a> {
 	rest: &'a str,
@@ -37,10 +37,10 @@ impl Parser<'_> {
 	}
 }
 
-const KEYWORDS: [&'static str; 3] = [
+const KEYWORDS: [&'static str; 5] = [
 	"int",
-	"fn",
-	"ret",
+	"fn", "ret",
+	"if", "else",
 ];
 
 impl Parser<'_> {
@@ -79,9 +79,18 @@ impl Parser<'_> {
 							CompilationError::at(new_token_pos.clone(), "integer literal too large".into())
 						)?
 					)
-				} else if "(){};,+".contains(c) {
-					let slice = &self.rest[..c.len_utf8()];
+				} else if "(){};,+-".contains(c) {
+					let slice = &self.rest[..1];
 					self.advance_char();
+					Node::Sym(InlinableString::from(slice))
+				} else if "<>".contains(c) {
+					let s = self.rest;
+					let mut slice = &s[..1];
+					self.advance_char();
+					if self.next_char.unwrap_or('\0') == '=' {
+						slice = &s[..2];
+						self.advance_char();
+					}
 					Node::Sym(InlinableString::from(slice))
 				} else {
 					return format_err!(new_token_pos, "unexpected character");
@@ -148,7 +157,7 @@ impl Parser<'_> {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, TryFromPrimitive)]
 #[repr(u32)]
 enum OpPrec {
-	Plus, Call,
+	Comp, Plus, Call,
 }
 
 impl Parser<'_> {
@@ -156,10 +165,22 @@ impl Parser<'_> {
 		let mut cur = self.parse_prim_expr()?;
 		loop {
 			let op_pos = self.next_token_pos.clone();
-			if min_prec <= OpPrec::Plus && self.check_sym("+")? {
-				let rhs = self.parse_expr_prec(OpPrec::try_from(min_prec as u32 + 1).unwrap())?;
+			if min_prec <= OpPrec::Comp && self.check_sym("<=")? {
+				let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Comp as u32 + 1).unwrap())?;
 				cur = NodePos(
-					Node::Plus(Box::new(cur), Box::new(rhs)),
+					Node::BinComp(BinCompOp::LE, Box::new(cur), Box::new(rhs)),
+					op_pos,
+				);
+			} else if min_prec <= OpPrec::Plus && self.check_sym("+")? {
+				let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Plus as u32 + 1).unwrap())?;
+				cur = NodePos(
+					Node::BinArith(BinArithOp::Plus, Box::new(cur), Box::new(rhs)),
+					op_pos,
+				);
+			} else if min_prec <= OpPrec::Plus && self.check_sym("-")? {
+				let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Plus as u32 + 1).unwrap())?;
+				cur = NodePos(
+					Node::BinArith(BinArithOp::Minus, Box::new(cur), Box::new(rhs)),
 					op_pos,
 				);
 			} else if min_prec <= OpPrec::Call && self.check_sym("(")? {
@@ -195,9 +216,38 @@ impl Parser<'_> {
 				self.expect_sym(";")?;
 			}
 			Ok(NodePos(Node::Ret(exp), pos))
+		} else if self.check_sym("if")? {
+			let mut if_br = vec![];
+			let mut else_br = None;
+			loop {
+				let cond = self.parse_expr()?;
+				self.expect_sym("{")?;
+				let body = self.parse_block()?;
+				if_br.push((cond, body));
+				if self.check_sym("else")? {
+					if self.check_sym("if")? {
+						continue;
+					}
+					self.expect_sym("{")?;
+					let body = self.parse_block()?;
+					else_br = Some(body);
+					break;
+				} else {
+					break;
+				}
+			}
+			Ok(NodePos(Node::If { if_br, else_br }, pos))
 		} else {
 			format_err!(self.next_token_pos, "expected instruction")
 		}
+	}
+
+	fn parse_block(&mut self) -> CompilerResult<Block> {
+		let mut body = vec![];
+		while !self.check_sym("}")? {
+			body.push(self.parse_instr()?);
+		}
+		Ok(body)
 	}
 	
 	fn parse_fn(&mut self) -> CompilerResult<NodePos> {
@@ -219,10 +269,7 @@ impl Parser<'_> {
 			ret = Some(self.parse_ty()?);
 			self.expect_sym("{")?;
 		}
-		let mut body = vec![];
-		while !self.check_sym("}")? {
-			body.push(self.parse_instr()?);
-		}
+		let body = self.parse_block()?;
 		Ok(NodePos(
 			Node::Fn { name, args, ret: ret.map(Box::new), body },
 			fn_pos,

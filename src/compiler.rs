@@ -163,14 +163,27 @@ impl Compiler {
 					None => format_err!(pos, "unknown identifier: '{}'", id),
 				}
 			},
-			Node::Plus(lhs, rhs) => {
+			Node::BinComp(op, lhs, rhs) => {
 				let lhs_val = self.compile_expr_no_void(lhs, sc)?;
 				let rhs_val = self.compile_expr_no_void(rhs, sc)?;
 				match (&lhs_val.1, &rhs_val.1) {
 					(Type::Int, Type::Int) => {
 						self.push_value(&lhs_val);
 						self.push_value(&rhs_val);
-						self.back.add();
+						self.back.bin_comp(*op);
+						Ok(Some(Value(Location::Temp, Type::Int)))
+					},
+					(lhs_ty, rhs_ty) => format_err!(pos, "cannot add {} to {}", lhs_ty, rhs_ty),
+				}
+			},
+			Node::BinArith(op, lhs, rhs) => {
+				let lhs_val = self.compile_expr_no_void(lhs, sc)?;
+				let rhs_val = self.compile_expr_no_void(rhs, sc)?;
+				match (&lhs_val.1, &rhs_val.1) {
+					(Type::Int, Type::Int) => {
+						self.push_value(&lhs_val);
+						self.push_value(&rhs_val);
+						self.back.bin_arith(*op);
 						Ok(Some(Value(Location::Temp, Type::Int)))
 					},
 					(lhs_ty, rhs_ty) => format_err!(pos, "cannot add {} to {}", lhs_ty, rhs_ty),

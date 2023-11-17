@@ -1,7 +1,7 @@
 use ahash::{HashMap, HashMapExt};
 use inlinable_string::InlinableString;
 
-use crate::{asm::{Assembler, Reg, Arg, Label}, mmap::ExecBox};
+use crate::{asm::{Assembler, Reg, Arg, Label}, mmap::ExecBox, ast::{BinArithOp, BinCompOp}};
 
 struct FnState {
 	ret_slots: u16,
@@ -140,12 +140,28 @@ impl Backend {
 			fn_state.temp_slots = 0;
 		}
 	}
+
+	pub fn bin_comp(&mut self, op: BinCompOp) {
+		let fn_state = self.cur_fn.as_mut().expect("not inside function");
+		assert!(fn_state.temp_slots >= 2, "not enough temporaries to compare");
+		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil);
+		self.asm.op_cmp(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX));
+		match op {
+			BinCompOp::LE => self.asm.op_setle(Arg::Reg(Reg::RAX), Arg::Nil),
+		}
+		self.asm.op_movzx(Arg::Reg(Reg::RAX), Arg::Reg(Reg::RAX));
+		self.asm.op_mov(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX));
+		fn_state.temp_slots -= 1;
+	}
 	
-	pub fn add(&mut self) {
+	pub fn bin_arith(&mut self, op: BinArithOp) {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
 		assert!(fn_state.temp_slots >= 2, "not enough temporaries to add");
 		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil);
-		self.asm.op_add(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX));
+		match op {
+			BinArithOp::Plus => self.asm.op_add(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX)),
+			BinArithOp::Minus => self.asm.op_sub(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX)),
+		}
 		fn_state.temp_slots -= 1;
 	}
 	

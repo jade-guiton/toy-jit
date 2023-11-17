@@ -4,17 +4,22 @@ ret	u16			C2
 				
 int3				CC
 				
-mov	r64	u32		B8+rd
-mov	r64	i64	W	B8+rd
-mov	r/m64	r64	W	89
-					
-add	r/m64	i32	W	81/0
-add	r/m64	r64	W	01
-sub	r/m64	i32	W	81/5
+mov	r	u32		B8+rd
+mov	r	i64	W	B8+rd
+mov	r/m	r	W	89
+				
+cmp	r/m	r	W	39
+setle	r/m			0F9E
+movzx	r	r/m		0FB6
+				
+add	r/m	i32	W	81/0
+add	r/m	r	W	01
+sub	r/m	i32	W	81/5
+sub	r/m	r	W	29
 					
 push	i8			6A
 push	i32			68
-push	r64			50+rd
-push	r/m64			FF/6
-pop	r64			58+rd
-pop	r/m64			8F/0
+push	r			50+rd
+push	r/m			FF/6
+pop	r			58+rd
+pop	r/m			8F/0

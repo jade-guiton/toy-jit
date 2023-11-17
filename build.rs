@@ -10,7 +10,7 @@ use nom::{
   character::complete::{char, one_of},
   combinator::{opt, map_res, map, map_opt, all_consuming, value},
 	bytes::complete::{take_while1, take_while_m_n, tag, is_a},
-	multi::{count, many0},
+	multi::{count, many0, many_m_n},
 	sequence::{terminated, preceded}, branch::alt,
 };
 
@@ -32,7 +32,7 @@ enum OpExt {
 struct Variant {
 	args: [Arg; 2],
 	rex_w: bool,
-	opcode: u8,
+	opcode: Vec<u8>,
 	op_ext: Option<OpExt>,
 }
 
@@ -53,8 +53,8 @@ fn parse_arg(input: &str) -> IResult<&str, Arg> {
 		map(preceded(char('u'), bit_cnt), |n| Arg::ImmU(n)),
 		map(preceded(char('i'), bit_cnt), |n| Arg::ImmI(n)),
 		value(Arg::Rel32, tag("rel32")),
-		value(Arg::Reg64, tag("r64")),
-		value(Arg::RegOrMem64, tag("r/m64")),
+		value(Arg::RegOrMem64, tag("r/m")),
+		value(Arg::Reg64, tag("r")),
 	))), |o| o.unwrap_or(Arg::Nil))(input);
 }
 
@@ -66,9 +66,9 @@ fn parse_variant(input: &str) -> IResult<&str, (Box<str>, Variant)> {
 	let (input, args) = count(terminated(parse_arg, char('\t')), 2)(input)?;
 	let (input, rex_w) = map(opt(char('W')), |o| o.is_some())(input)?;
 	let (input, _) = char('\t')(input)?;
-	let (input, opcode) = map_res(
+	let (input, opcode) = many_m_n(1, 3, map_res(
 		take_while_m_n(2, 2, |c: char| c.is_digit(16)),
-		|s: &str| u8::from_str_radix(s, 16))(input)?;
+		|s: &str| u8::from_str_radix(s, 16)))(input)?;
 	let (input, op_ext) = opt(alt((
 		map(tag("+rd"), |_| OpExt::PlusRd),
 		map(preceded(char('/'), octal_digit), |reg| OpExt::Reg(reg)),
@@ -159,19 +159,24 @@ fn main() {
 				if var.rex_w {
 					write!(out, "        self.buf.push_u8(REX_W);\n").unwrap();
 				}
+				for i in 0..var.opcode.len()-1 {
+					write!(out, "        self.buf.push_u8({:#02x});\n", var.opcode[i]).unwrap();
+				}
 				match var.op_ext {
 					None | Some(OpExt::Reg(_)) => {
-						write!(out, "        self.buf.push_u8({:#02x});\n", var.opcode).unwrap();
+						write!(out, "        self.buf.push_u8({:#02x});\n", var.opcode.last().unwrap()).unwrap();
 					},
 					Some(OpExt::PlusRd) => {
-						write!(out, "        self.buf.push_u8({:#02x} + reg as u8);\n", var.opcode).unwrap();
+						write!(out, "        self.buf.push_u8({:#02x} + reg as u8);\n", var.opcode.last().unwrap()).unwrap();
 					},
-				}
-				if let Some(OpExt::Reg(reg)) = var.op_ext {
-					write!(out, "        let reg: u8 = {};\n", reg).unwrap();
 				}
 				
 				if has_rm {
+					if let Some(OpExt::Reg(reg)) = var.op_ext {
+						write!(out, "        let reg: u8 = {};\n", reg).unwrap();
+					} else if var.args[0] != Arg::Reg64 && var.args[1] != Arg::Reg64 {
+						write!(out, "        let reg: u8 = 0;\n").unwrap();
+					}
 					if i == 1 { // rm is a register
 						write!(out, "        let mode: u8 = 0b11;\n").unwrap();
 					} else {
