@@ -37,9 +37,9 @@ impl MmapVec {
 	pub fn make_exec(mut self) -> ExecBox {
 		let ptr = self.ptr;
 		self.ptr = null_mut();
-		unsafe { mprotect(ptr, self.len, ProtFlags::PROT_READ | ProtFlags::PROT_EXEC) }
+		unsafe { mprotect(ptr, self.cap, ProtFlags::PROT_READ | ProtFlags::PROT_EXEC) }
 			.expect("mprotect failed");
-		ExecBox { ptr, len: self.len }
+		ExecBox { ptr, len: self.cap }
 	}
 	
 	pub fn len(&self) -> usize {
@@ -95,7 +95,7 @@ impl std::ops::DerefMut for MmapVec {
 impl std::ops::Drop for MmapVec {
 	fn drop(&mut self) {
 		if !self.ptr.is_null() {
-			unsafe { munmap(self.ptr, self.len) }.expect("munmap failed");
+			unsafe { munmap(self.ptr, self.cap) }.expect("munmap failed");
 		}
 	}
 }

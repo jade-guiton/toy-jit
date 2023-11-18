@@ -40,14 +40,7 @@ fn main() {
 		}
 	};
 	
-	let mut comp = Compiler::new();
-	for fn_node in ast {
-		if let Err(err) = comp.compile_fn(&fn_node) {
-			eprintln!("compilation error: {}", err);
-			std::process::exit(1);
-		}
-	}
-	let code = match comp.finalize() {
+	let code = match Compiler::compile_program(&ast) {
 		Ok(code) => code,
 		Err(err) => {
 			eprintln!("compilation error: {}", err);

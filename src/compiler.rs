@@ -1,4 +1,3 @@
-use core::panic;
 use std::{rc::Rc, cell::RefCell};
 
 use ahash::{HashMap, HashMapExt};
@@ -7,12 +6,12 @@ use inlinable_string::InlinableString;
 use crate::{
 	backend::Backend,
 	asm::Label,
-	ast::{Node, NodePos, CompilationError, at, CompilerResult, BinCompOp},
+	ast::{Node, NodePos, CompilationError, at, CompilerResult, BinCompOp, FnDecl, Pos},
 	mmap::ExecBox,
 	format_err_nowhere, format_err
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum Location {
 	Const(i64),
 	Label(Label),
@@ -22,8 +21,23 @@ enum Location {
 	LazyComp(BinCompOp),
 }
 
+impl Location {
+	fn is_concrete(&self) -> bool {
+		match self {
+			Location::Temp | Location::LazyComp(_) => false,
+			_ => true,
+		}
+	}
+	fn is_global(&self) -> bool {
+		match self {
+			Location::Const(_) | Location::Label(_) => true,
+			_ => false,
+		}
+	}
+}
+
 #[derive(PartialEq, Eq, Clone)]
-enum Type {
+pub enum Type {
 	Int,
 	Bool,
 	Fn {
@@ -61,13 +75,15 @@ struct Value(Location, Type);
 struct Scope {
 	parent: Option<Rc<RefCell<Scope>>>,
 	bindings: HashMap<InlinableString, Value>,
+	allow_shadowing: bool,
 }
 
 impl Scope {
-	fn new(parent: Option<Rc<RefCell<Scope>>>) -> Rc<RefCell<Self>> {
+	fn new(parent: Option<Rc<RefCell<Scope>>>, allow_shadowing: bool) -> Rc<RefCell<Self>> {
 		Rc::new(RefCell::new(Scope {
 			parent,
 			bindings: HashMap::new(),
+			allow_shadowing,
 		}))
 	}
 	
@@ -81,11 +97,18 @@ impl Scope {
 		}
 	}
 	
-	fn put(&mut self, key: &str, val: Value) {
-		if self.parent.is_none() && self.bindings.contains_key(key) {
-			panic!("globals are not allowed to shadow each other");
+	fn put(&mut self, key: &str, val: Value, pos: &Pos) -> CompilerResult<()> {
+		assert!(val.0.is_concrete(), "binding at non-concrete location: {:?}", val.0);
+		if self.parent.is_none() {
+			assert!(val.0.is_global(), "global binding at non-constant location: {:?}", val.0);
+		}
+		if !self.allow_shadowing {
+			if self.bindings.contains_key(key) {
+				return format_err!(pos, "binding '{}' has multiple definitions", key);
+			}
 		}
 		self.bindings.insert(key.into(), val);
+		Ok(())
 	}
 }
 
@@ -103,7 +126,7 @@ impl Compiler {
 	pub fn new() -> Self {
 		Compiler {
 			back: Backend::new(),
-			globals: Scope::new(None)
+			globals: Scope::new(None, false),
 		}
 	}
 	
@@ -124,7 +147,7 @@ impl Compiler {
 			_ => format_err_nowhere!("'main' must be a static function")?,
 		};
 		
-		let entry_lbl = self.back.get_global("_start");
+		let entry_lbl = self.back.new_label();
 		self.back.gen_c_entry(entry_lbl, main_lbl);
 		let entry_off = self.back.get_label_offset(entry_lbl);
 		
@@ -140,6 +163,7 @@ impl Compiler {
 	fn resolve_ty(&self, node: &Node) -> Type {
 		match node {
 			Node::IntType => Type::Int,
+			Node::BoolType => Type::Bool,
 			_ => unreachable!(),
 		}
 	}
@@ -280,38 +304,83 @@ impl Compiler {
 				self.back.ret();
 				Ok(())
 			},
+			Node::ExprStat(exp) => {
+				let val = self.compile_expr(&exp, sc)?;
+				if val.is_some() {
+					self.back.ignore();
+				}
+				Ok(())
+			},
 			_ => unreachable!(),
 		}
 	}
 	
-	pub fn compile_fn(&mut self, np: &NodePos) -> CompilerResult<()> {
+	pub fn declare_fn(&mut self, fn_decl: &FnDecl, pos: &Pos) -> CompilerResult<()> {
+		let mut args_ty: Vec<Type> = vec![];
+		for (_, arg_ty) in fn_decl.args.iter() {
+			let arg_ty = self.resolve_ty(arg_ty);
+			args_ty.push(arg_ty.clone());
+		}
+		let args_ty = args_ty.into_boxed_slice();
+		let ret_ty = fn_decl.ret.as_ref().map(|n| self.resolve_ty(&n));
+		
+		let fn_ty = Type::Fn { args: args_ty.clone(), ret: ret_ty.clone().map(Box::new) };
+		let fn_lbl = self.back.new_label();
+		let fn_loc = Location::Label(fn_lbl);
+		let fn_val = Value(fn_loc, fn_ty);
+		self.globals.borrow_mut().put(&fn_decl.name, fn_val.clone(), pos)?;
+		
+		Ok(())
+	}
+	
+	pub fn compile_fn(&mut self, fn_decl: &FnDecl, pos: &Pos) -> CompilerResult<()> {
+		let fn_val = self.globals.borrow().find(&fn_decl.name).expect("function not declared before compilation");
+		let (args_ty, ret_ty, fn_lbl) =
+			if let Value(Location::Label(lbl), Type::Fn { args, ret }) = fn_val {
+				(args, ret.map(|b| *b.clone()), lbl)
+			} else { unreachable!() };
+		
+		let arg_scope = Scope::new(Some(self.globals.clone()), false);
+		for (i, (arg_name, _)) in fn_decl.args.iter().enumerate() {
+			let arg_loc = Location::Arg(at(i.try_into(), pos.clone())?);
+			arg_scope.borrow_mut().put(arg_name, Value(arg_loc, args_ty[i].clone()), pos)?;
+		}
+		let fn_scope = Scope::new(Some(arg_scope), true);
+		
+		let ret_slots = if ret_ty.is_some() { 1 } else { 0 };
+		self.back.begin_fn(fn_lbl, at(fn_decl.args.len().try_into(), pos.clone())?, ret_slots);
+		for stat in &fn_decl.body {
+			self.compile_stat(stat, &mut fn_scope.borrow_mut(), &ret_ty)?;
+		}
+		self.back.ret(); // Just in case
+		self.back.end_fn();
+		Ok(())
+	}
+	
+	pub fn declare(&mut self, np: &NodePos) -> CompilerResult<()> {
 		let NodePos(node, pos) = np;
 		match node {
-			Node::Fn { name, args, ret, body } => {
-				let mut args_ty: Vec<Type> = vec![];
-				let scope = Scope::new(Some(self.globals.clone()));
-				for (i, (arg_name, arg_ty)) in args.iter().enumerate() {
-					let arg_ty = self.resolve_ty(arg_ty);
-					args_ty.push(arg_ty.clone());
-					let arg_loc = Location::Arg(at(i.try_into(), pos.clone())?);
-					scope.borrow_mut().put(arg_name, Value(arg_loc, arg_ty));
-				}
-				let ret_ty = ret.as_ref().map(|n| self.resolve_ty(&n));
-				
-				let fn_ty = Type::Fn { args: args_ty.into_boxed_slice(), ret: ret_ty.clone().map(Box::new) };
-				let fn_lbl = self.back.get_global(name);
-				let fn_loc = Location::Label(fn_lbl);
-				self.globals.borrow_mut().put(name, Value(fn_loc, fn_ty));
-				
-				let ret_slots = if ret_ty.is_some() { 1 } else { 0 };
-				self.back.begin_fn(fn_lbl, at(args.len().try_into(), pos.clone())?, ret_slots);
-				for stat in body {
-					self.compile_stat(stat, &mut scope.borrow_mut(), &ret_ty)?;
-				}
-				self.back.end_fn();
-				Ok(())
-			}
+			Node::Fn(fn_decl) => self.declare_fn(fn_decl, pos).map(|_| ()),
 			_ => unreachable!(),
 		}
+	}
+	
+	pub fn define(&mut self, np: &NodePos) -> CompilerResult<()> {
+		let NodePos(node, pos) = np;
+		match node {
+			Node::Fn(fn_decl) => self.compile_fn(fn_decl, pos),
+			_ => unreachable!(),
+		}
+	}
+	
+	pub fn compile_program(ast: &[NodePos]) -> CompilerResult<CompilerOutput> {
+		let mut comp = Compiler::new();
+		for decl in ast {
+			comp.declare(decl)?;
+		}
+		for decl in ast {
+			comp.define(decl)?;
+		}
+		comp.finalize()
 	}
 }

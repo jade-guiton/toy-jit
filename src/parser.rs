@@ -2,7 +2,7 @@ use inlinable_string::InlinableString;
 use num_enum::TryFromPrimitive;
 use unicode_xid::UnicodeXID;
 
-use crate::{ast::{CompilationError, CompilerResult, Node, Pos, NodePos, Block, BinCompOp, BinArithOp}, format_err};
+use crate::{ast::{CompilationError, CompilerResult, Node, Pos, NodePos, Block, BinCompOp, BinArithOp, FnDecl}, format_err};
 
 pub struct Parser<'a> {
 	rest: &'a str,
@@ -37,8 +37,8 @@ impl Parser<'_> {
 	}
 }
 
-const KEYWORDS: [&'static str; 5] = [
-	"int",
+const KEYWORDS: [&'static str; 6] = [
+	"int", "bool",
 	"fn", "ret",
 	"if", "else",
 ];
@@ -136,6 +136,8 @@ impl Parser<'_> {
 	fn parse_ty(&mut self) -> CompilerResult<Node> {
 		if self.check_sym("int")? {
 			Ok(Node::IntType)
+		} else if self.check_sym("bool")? {
+			Ok(Node::BoolType)
 		} else {
 			format_err!(self.next_token_pos, "expected type")
 		}
@@ -238,7 +240,9 @@ impl Parser<'_> {
 			}
 			Ok(NodePos(Node::If { if_br, else_br }, pos))
 		} else {
-			format_err!(self.next_token_pos, "expected instruction")
+			let expr = self.parse_expr()?;
+			self.expect_sym(";")?;
+			Ok(NodePos(Node::ExprStat(Box::new(expr)), pos))
 		}
 	}
 
@@ -271,7 +275,7 @@ impl Parser<'_> {
 		}
 		let body = self.parse_block()?;
 		Ok(NodePos(
-			Node::Fn { name, args, ret: ret.map(Box::new), body },
+			Node::Fn(FnDecl { name, args, ret: ret.map(Box::new), body }),
 			fn_pos,
 		))
 	}

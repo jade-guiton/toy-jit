@@ -1,6 +1,3 @@
-use ahash::{HashMap, HashMapExt};
-use inlinable_string::InlinableString;
-
 use crate::{asm::{Assembler, Reg, Arg, Label}, mmap::ExecBox, ast::{BinArithOp, BinCompOp}};
 
 struct FnState {
@@ -12,27 +9,23 @@ struct FnState {
 
 pub struct Backend {
 	asm: Assembler,
-	globals: HashMap<InlinableString, Label>,
 	cur_fn: Option<FnState>,
 }
 
 impl Backend {
 	pub fn new() -> Backend {
-		Backend { asm: Assembler::new(), globals: HashMap::new(), cur_fn: None }
+		Backend { asm: Assembler::new(), cur_fn: None }
 	}
 	
 	pub fn finalize(self) -> ExecBox {
 		self.asm.finalize()
 	}
 	
-	pub fn get_global(&mut self, name: &str) -> Label {
-		if let Some(lbl) = self.globals.get(name) {
-			*lbl
-		} else {
-			let lbl = self.asm.new_label();
-			self.globals.insert(name.into(), lbl);
-			lbl
-		}
+	pub fn new_label(&mut self) -> Label {
+		self.asm.new_label()
+	}
+	pub fn set_label(&mut self, lbl: Label) {
+		self.asm.set_label(lbl);
 	}
 	pub fn get_label_offset(&mut self, lbl: Label) -> usize {
 		self.asm.get_label_idx(lbl)
@@ -70,12 +63,16 @@ impl Backend {
 	pub fn gen_c_entry(&mut self, lbl: Label, main_fn: Label) {
 		assert!(self.cur_fn.is_none(), "current function not finished");
 		self.asm.set_label(lbl);
-		self.asm.op_int3(Arg::Nil, Arg::Nil);
-		self.asm.op_push(Arg::Reg(Reg::RBP), Arg::Nil); // SysV64 prologue
+		self.asm.op_int3(Arg::Nil, Arg::Nil); // Manual breakpoint
+		
+		// Only RBP is used among "callee-saved" registers
+		self.asm.op_push(Arg::Reg(Reg::RBP), Arg::Nil);
+		
 		self.asm.op_sub(Arg::Reg(Reg::RSP), Arg::Imm(8)); // 1 return slot
 		self.asm.op_call(Arg::Lbl(main_fn), Arg::Nil);
 		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil); // place return value in RAX
-		self.asm.op_pop(Arg::Reg(Reg::RBP), Arg::Nil); // SysV64 epilogue
+		
+		self.asm.op_pop(Arg::Reg(Reg::RBP), Arg::Nil);
 		self.asm.op_ret(Arg::Nil, Arg::Nil);
 	}
 	
@@ -223,12 +220,5 @@ impl Backend {
 		assert!(fn_state.temp_slots >= arg_slots as u32 + ret_slots as u32, "not enough slots on stack for call");
 		self.asm.op_call(Arg::Lbl(fn_lbl), Arg::Nil);
 		fn_state.temp_slots -= arg_slots as u32;
-	}
-	
-	pub fn new_label(&mut self) -> Label {
-		self.asm.new_label()
-	}
-	pub fn set_label(&mut self, lbl: Label) {
-		self.asm.set_label(lbl);
 	}
 }

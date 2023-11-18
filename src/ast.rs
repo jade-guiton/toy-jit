@@ -15,7 +15,7 @@ impl std::fmt::Debug for Pos {
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinCompOp {
 	LT, GT,
 	LE, GE,
@@ -41,19 +41,22 @@ pub enum BinArithOp {
 	Minus,
 }
 
+pub struct FnDecl {
+	pub name: InlinableString,
+	pub args: Vec<(InlinableString, Node)>,
+	pub ret: Option<Box<Node>>,
+	pub body: Block,
+}
+
 pub enum Node {
-	Fn {
-		name: InlinableString,
-		args: Vec<(InlinableString, Node)>,
-		ret: Option<Box<Node>>,
-		body: Block,
-	},
-	IntType,
+	Fn(FnDecl),
+	IntType, BoolType,
 	If {
 		if_br: Vec<(NodePos, Block)>,
 		else_br: Option<Block>,
 	},
 	Ret(Option<Box<NodePos>>),
+	ExprStat(Box<NodePos>),
 	Call {
 		func: Box<NodePos>,
 		args: Vec<NodePos>,
