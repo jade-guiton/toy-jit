@@ -111,6 +111,11 @@ impl Backend {
 		self.asm.op_push(Arg::Imm(val), Arg::Nil);
 		fn_state.temp_slots += 1;
 	}
+	pub fn push_label(&mut self, lbl: Label) {
+		let fn_state = self.cur_fn.as_mut().expect("not inside function");
+		self.asm.op_push(Arg::Lbl(lbl), Arg::Nil);
+		fn_state.temp_slots += 1;
+	}
 	
 	pub fn pop_arg(&mut self, slot_idx: u16) {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
@@ -140,18 +145,61 @@ impl Backend {
 			fn_state.temp_slots = 0;
 		}
 	}
-
-	pub fn bin_comp(&mut self, op: BinCompOp) {
+	
+	pub fn bin_comp_push(&mut self, op: BinCompOp) {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
 		assert!(fn_state.temp_slots >= 2, "not enough temporaries to compare");
-		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil);
-		self.asm.op_cmp(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX));
+		self.asm.op_pop(Arg::Reg(Reg::RCX), Arg::Nil);
+		self.asm.op_cmp(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RCX));
 		match op {
+			BinCompOp::LT => self.asm.op_setl(Arg::Reg(Reg::RAX), Arg::Nil),
+			BinCompOp::GT => self.asm.op_setg(Arg::Reg(Reg::RAX), Arg::Nil),
 			BinCompOp::LE => self.asm.op_setle(Arg::Reg(Reg::RAX), Arg::Nil),
+			BinCompOp::GE => self.asm.op_setge(Arg::Reg(Reg::RAX), Arg::Nil),
+			BinCompOp::EQ => self.asm.op_sete(Arg::Reg(Reg::RAX), Arg::Nil),
+			BinCompOp::NE => self.asm.op_setne(Arg::Reg(Reg::RAX), Arg::Nil),
 		}
 		self.asm.op_movzx(Arg::Reg(Reg::RAX), Arg::Reg(Reg::RAX));
 		self.asm.op_mov(Arg::IndReg(Reg::RSP, 0), Arg::Reg(Reg::RAX));
 		fn_state.temp_slots -= 1;
+	}
+	
+	pub fn bin_comp_jmp(&mut self, mut op: BinCompOp, invert: bool, to: Label) {
+		let fn_state = self.cur_fn.as_mut().expect("not inside function");
+		assert!(fn_state.temp_slots >= 2, "not enough temporaries to compare");
+		self.asm.op_pop(Arg::Reg(Reg::RCX), Arg::Nil);
+		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil);
+		self.asm.op_cmp(Arg::Reg(Reg::RAX), Arg::Reg(Reg::RCX));
+		if invert {
+			op = op.opposite();
+		}
+		match op {
+			BinCompOp::LT => self.asm.op_jl(Arg::Lbl(to), Arg::Nil),
+			BinCompOp::GT => self.asm.op_jg(Arg::Lbl(to), Arg::Nil),
+			BinCompOp::LE => self.asm.op_jle(Arg::Lbl(to), Arg::Nil),
+			BinCompOp::GE => self.asm.op_jge(Arg::Lbl(to), Arg::Nil),
+			BinCompOp::EQ => self.asm.op_je(Arg::Lbl(to), Arg::Nil),
+			BinCompOp::NE => self.asm.op_jne(Arg::Lbl(to), Arg::Nil),
+		}
+		fn_state.temp_slots -= 2;
+	}
+	
+	pub fn zero_comp_jmp(&mut self, invert: bool, to: Label) {
+		let fn_state = self.cur_fn.as_mut().expect("not inside function");
+		assert!(fn_state.temp_slots >= 1, "no temporary to compare");
+		self.asm.op_pop(Arg::Reg(Reg::RAX), Arg::Nil);
+		self.asm.op_test(Arg::Reg(Reg::RAX), Arg::Reg(Reg::RAX));
+		if invert {
+			self.asm.op_jnz(Arg::Lbl(to), Arg::Nil);
+		} else {
+			self.asm.op_jz(Arg::Lbl(to), Arg::Nil);
+		}
+		fn_state.temp_slots -= 1;
+	}
+	
+	pub fn jmp(&mut self, to: Label) {
+		let _fn_state = self.cur_fn.as_mut().expect("not inside function");
+		self.asm.op_jmp(Arg::Lbl(to), Arg::Nil);
 	}
 	
 	pub fn bin_arith(&mut self, op: BinArithOp) {
@@ -175,5 +223,12 @@ impl Backend {
 		assert!(fn_state.temp_slots >= arg_slots as u32 + ret_slots as u32, "not enough slots on stack for call");
 		self.asm.op_call(Arg::Lbl(fn_lbl), Arg::Nil);
 		fn_state.temp_slots -= arg_slots as u32;
+	}
+	
+	pub fn new_label(&mut self) -> Label {
+		self.asm.new_label()
+	}
+	pub fn set_label(&mut self, lbl: Label) {
+		self.asm.set_label(lbl);
 	}
 }

@@ -19,7 +19,7 @@ enum Arg {
 	Nil,
 	ImmI(u8), ImmU(u8),
 	Rel32,
-	Reg64, RegOrMem64,
+	Reg64, RegOrMem64, Mem64,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +55,7 @@ fn parse_arg(input: &str) -> IResult<&str, Arg> {
 		value(Arg::Rel32, tag("rel32")),
 		value(Arg::RegOrMem64, tag("r/m")),
 		value(Arg::Reg64, tag("r")),
+		value(Arg::Mem64, tag("m")),
 	))), |o| o.unwrap_or(Arg::Nil))(input);
 }
 
@@ -116,9 +117,11 @@ fn main() {
 		write!(out, "  pub fn op_{}(&mut self, a1: Arg, a2: Arg) {{\n", mnem).unwrap();
 		write!(out, "    match (a1, a2) {{\n").unwrap();
 		for var in vars {
-			let has_rm = var.args[0] == Arg::RegOrMem64 || var.args[1] == Arg::RegOrMem64;
-			let rep = if has_rm { 2 } else { 1 };
-			for i in 0..rep {
+			let has_reg_or_mem = var.args[0] == Arg::RegOrMem64 || var.args[1] == Arg::RegOrMem64;
+			let has_mem = var.args[0] == Arg::Mem64 || var.args[1] == Arg::Mem64;
+			let has_reg = (var.args[0] == Arg::Reg64 || var.args[1] == Arg::Reg64) && !matches!(var.op_ext, Some(OpExt::PlusRd));
+			let cases = if has_reg_or_mem { 3 } else if has_mem { 2 } else { 1 };
+			for i in 0..cases {
 				write!(out, "      (").unwrap();
 				let mut guard = String::new();
 				let mut imm: Option<Arg> = None;
@@ -141,17 +144,20 @@ fn main() {
 							}
 						},
 						Arg::Reg64 => write!(out, "Arg::Reg(reg)").unwrap(),
-						Arg::RegOrMem64 => {
-							if i == 0 {
-								write!(out, "Arg::IndReg(rm, off)").unwrap();
-							} else {
-								write!(out, "Arg::Reg(rm)").unwrap();
-							}
+						Arg::Mem64 | Arg::RegOrMem64 if i < 2 => match i {
+							0 => write!(out, "Arg::IndReg(rm, off)").unwrap(),
+							1 => {
+								write!(out, "Arg::Lbl(lbl)").unwrap();
+								imm = Some(Arg::Rel32);
+							},
+							_ => unreachable!()
 						},
+						Arg::RegOrMem64 if i == 2 => write!(out, "Arg::Reg(rm)").unwrap(),
 						Arg::Rel32 => {
 							write!(out, "Arg::Lbl(lbl)").unwrap();
 							imm = Some(Arg::Rel32);
 						},
+						_ => panic!("{:?}, i={}", var.args[j], i),
 					}
 				}
 				write!(out, ") {}=> {{\n", guard).unwrap();
@@ -171,21 +177,29 @@ fn main() {
 					},
 				}
 				
-				if has_rm {
+				if has_reg_or_mem || has_reg || has_mem {
 					if let Some(OpExt::Reg(reg)) = var.op_ext {
 						write!(out, "        let reg: u8 = {};\n", reg).unwrap();
-					} else if var.args[0] != Arg::Reg64 && var.args[1] != Arg::Reg64 {
+					} else if !has_reg {
 						write!(out, "        let reg: u8 = 0;\n").unwrap();
 					}
-					if i == 1 { // rm is a register
-						write!(out, "        let mode: u8 = 0b11;\n").unwrap();
-					} else {
-						write!(out, "        let no_off = off == 0 && rm != Reg::RBP;\n").unwrap();
-						write!(out, "        let sm_off = off >= -128 && off < 128;\n").unwrap();
-						write!(out, "        let mode: u8 = if no_off {{ 0b00 }} else if sm_off {{ 0b01 }} else {{ 0b10 }};\n").unwrap();
+					match i {
+						0 => { // IndReg
+							write!(out, "        let no_off = off == 0 && rm != Reg::RBP;\n").unwrap();
+							write!(out, "        let sm_off = off >= -128 && off < 128;\n").unwrap();
+							write!(out, "        let mode: u8 = if no_off {{ 0b00 }} else if sm_off {{ 0b01 }} else {{ 0b10 }};\n").unwrap();
+						},
+						1 => { // Lbl
+							write!(out, "        let mode: u8 = 0b00;\n").unwrap();
+							write!(out, "        let rm: u8 = 0b101;\n").unwrap();
+						},
+						2 => { // Reg
+							write!(out, "        let mode: u8 = 0b11;\n").unwrap();
+						},
+						_ => unreachable!(),
 					}
 					write!(out, "        self.buf.push_u8(modrm(mode, reg as u8, rm as u8));\n").unwrap();
-					if i != 1 {
+					if i == 0 {
 						write!(out, "        if mode == 0b01 {{\n").unwrap();
 						write!(out, "          self.buf.push_i8(off as i8);\n").unwrap();
 						write!(out, "        }} else if mode == 0b10 {{\n").unwrap();
@@ -195,12 +209,13 @@ fn main() {
 						write!(out, "          self.buf.push_u8(sib(0, Reg::RSP as u8, rm as u8));\n").unwrap();
 						write!(out, "        }}\n").unwrap();
 					}
+					// (Lbl has its displacement handled by the code below)
 				}
 				
 				match imm {
 					Some(Arg::ImmU(size)) => write!(out, "        self.buf.push_u{}(imm as u{});\n", size, size).unwrap(),
 					Some(Arg::ImmI(size)) => write!(out, "        self.buf.push_i{}(imm as i{});\n", size, size).unwrap(),
-					Some(Arg::Rel32) => write!(out, "        self.ref_label(lbl);\n").unwrap(),
+					Some(Arg::Rel32) => write!(out, "        self.push_label_rel32(lbl);\n").unwrap(),
 					None => {},
 					_ => unreachable!(),
 				}

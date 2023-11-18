@@ -71,16 +71,6 @@ impl MmapVec {
 	pub fn push_u32(&mut self, x: u32) { self.push_bytes(x.to_le_bytes()); }
 	pub fn push_i32(&mut self, x: i32) { self.push_bytes(x.to_le_bytes()); }
 	pub fn push_i64(&mut self, x: i64) { self.push_bytes(x.to_le_bytes()); }
-	
-	pub fn write_rel32(&mut self, at: usize, to: usize) {
-		let from = at + 4;
-		let diff = (to as isize) - (from as isize);
-		let diff: i32 = diff.try_into().expect("relative address too large to encode");
-		let bytes = diff.to_le_bytes();
-		for i in 0..4 {
-			self[at + i] = bytes[i];
-		}
-	}
 }
 
 impl ExecBox {

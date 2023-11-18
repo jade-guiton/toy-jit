@@ -17,8 +17,24 @@ impl std::fmt::Debug for Pos {
 
 #[derive(Clone, Copy)]
 pub enum BinCompOp {
-	LE,
+	LT, GT,
+	LE, GE,
+	EQ, NE,
 }
+
+impl BinCompOp {
+	pub fn opposite(self) -> BinCompOp {
+		match self {
+			BinCompOp::LT => BinCompOp::GE,
+			BinCompOp::GT => BinCompOp::LE,
+			BinCompOp::LE => BinCompOp::GT,
+			BinCompOp::GE => BinCompOp::LT,
+			BinCompOp::EQ => BinCompOp::NE,
+			BinCompOp::NE => BinCompOp::EQ,
+		}
+	}
+}
+
 #[derive(Clone, Copy)]
 pub enum BinArithOp {
 	Plus,

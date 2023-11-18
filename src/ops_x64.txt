@@ -7,10 +7,27 @@ int3				CC
 mov	r	u32		B8+rd
 mov	r	i64	W	B8+rd
 mov	r/m	r	W	89
+movzx	r	r/m		0FB6
+				
+lea	r	m	W	8D
 				
 cmp	r/m	r	W	39
+jmp	rel32			E9
+jz	rel32			0F84
+jnz	rel32			0F85
+je	rel32			0F84
+jne	rel32			0F85
+jl	rel32			0F8C
+jge	rel32			0F8D
+jle	rel32			0F8E
+jg	rel32			0F8F
+sete	r/m			0F94
+setne	r/m			0F95
+setl	r/m			0F9C
+setge	r/m			0F9D
 setle	r/m			0F9E
-movzx	r	r/m		0FB6
+setg	r/m			0F9F
+test	r/m	r	W	85
 				
 add	r/m	i32	W	81/0
 add	r/m	r	W	01

@@ -55,24 +55,34 @@ impl Assembler {
 		lbl
 	}
 	
-	fn ref_label(&mut self, lbl: Label) {
+	pub fn write_rel32(&mut self, at: usize, to: usize) {
+		let from = at + 4;
+		let diff = (to as isize) - (from as isize);
+		let diff: i32 = diff.try_into().expect("relative address too large to encode");
+		let bytes = diff.to_le_bytes();
+		for i in 0..4 {
+			self.buf[at + i] = bytes[i];
+		}
+	}
+	
+	fn push_label_rel32(&mut self, lbl: Label) {
 		let at = self.buf.len();
 		self.buf.push_i32(0); // placeholder
-		match &mut self.labels[lbl] {
-			LabelState::Forward(refs) => refs.push(at),
-			LabelState::Defined(to) => self.buf.write_rel32(at, *to),
+		if let LabelState::Forward(refs) = &mut self.labels[lbl] {
+			refs.push(at);
+		} else if let LabelState::Defined(to) = &self.labels[lbl] {
+			self.write_rel32(at, *to);
 		}
 	}
 	
 	pub fn set_label(&mut self, lbl: Label) {
 		let to = self.buf.len();
-		match &self.labels[lbl] {
-			LabelState::Forward(refs) => {
-				for at in refs {
-					self.buf.write_rel32(*at, to)
-				}
-			},
-			LabelState::Defined(_) => panic!("assembly label defined twice"),
+		if let LabelState::Forward(refs) = &self.labels[lbl] {
+			for at in refs.clone() {
+				self.write_rel32(at, to);
+			}
+		} else {
+			panic!("assembly label defined twice");
 		}
 		self.labels[lbl] = LabelState::Defined(to);
 	}

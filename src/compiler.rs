@@ -7,7 +7,7 @@ use inlinable_string::InlinableString;
 use crate::{
 	backend::Backend,
 	asm::Label,
-	ast::{Node, NodePos, CompilationError, at, CompilerResult},
+	ast::{Node, NodePos, CompilationError, at, CompilerResult, BinCompOp},
 	mmap::ExecBox,
 	format_err_nowhere, format_err
 };
@@ -19,11 +19,13 @@ enum Location {
 	Local(u32),
 	Arg(u16),
 	Temp,
+	LazyComp(BinCompOp),
 }
 
 #[derive(PartialEq, Eq, Clone)]
 enum Type {
 	Int,
+	Bool,
 	Fn {
 		args: Box<[Type]>,
 		ret: Option<Box<Type>>,
@@ -33,6 +35,7 @@ enum Type {
 impl std::fmt::Display for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
+			Type::Bool => f.write_str("bool"),
 			Type::Int => f.write_str("int"),
 			Type::Fn { args, ret } => {
 				f.write_str("fn(")?;
@@ -147,7 +150,8 @@ impl Compiler {
 			Location::Local(off) => self.back.push_local(off),
 			Location::Arg(off) => self.back.push_arg(off),
 			Location::Temp => {},
-			Location::Label(_) => todo!(),
+			Location::Label(lbl) => self.back.push_label(lbl),
+			Location::LazyComp(op) => self.back.bin_comp_push(op),
 		}
 	}
 	
@@ -170,8 +174,7 @@ impl Compiler {
 					(Type::Int, Type::Int) => {
 						self.push_value(&lhs_val);
 						self.push_value(&rhs_val);
-						self.back.bin_comp(*op);
-						Ok(Some(Value(Location::Temp, Type::Int)))
+						Ok(Some(Value(Location::LazyComp(*op), Type::Bool)))
 					},
 					(lhs_ty, rhs_ty) => format_err!(pos, "cannot add {} to {}", lhs_ty, rhs_ty),
 				}
@@ -228,9 +231,43 @@ impl Compiler {
 		}
 	}
 	
+	fn compile_branch(&mut self, cond: &NodePos, sc: &Scope, to: Label, invert: bool) -> CompilerResult<()> {
+		// When &&/|| are implemented, shortcut evaluation should be implemented here
+		let cond_val = self.compile_expr_no_void(cond, sc)?;
+		if cond_val.1 != Type::Bool {
+			format_err!(cond.1, "condition must evaluate to bool")?;
+		}
+		if let Location::LazyComp(op) = cond_val.0 {
+			self.back.bin_comp_jmp(op, invert, to);
+		} else {
+			self.push_value(&cond_val);
+			self.back.zero_comp_jmp(invert, to);
+		}
+		Ok(())
+	}
+	
 	fn compile_stat(&mut self, np: &NodePos, sc: &mut Scope, ret_ty: &Option<Type>) -> CompilerResult<()> {
 		let NodePos(node, pos) = np;
 		match node {
+			Node::If { if_br, else_br } => {
+				let end = self.back.new_label();
+				for (cond, block) in if_br {
+					let next = self.back.new_label();
+					self.compile_branch(cond, sc, next, true)?;
+					for instr in block {
+						self.compile_stat(instr, sc, ret_ty)?;
+					}
+					self.back.jmp(end);
+					self.back.set_label(next);
+				}
+				if let Some(block) = else_br {
+					for instr in block {
+						self.compile_stat(instr, sc, ret_ty)?;
+					}
+				}
+				self.back.set_label(end);
+				Ok(())
+			},
 			Node::Ret(exp) => {
 				let val = exp.as_ref().map(|exp| self.compile_expr(&exp, sc)).transpose()?.flatten();
 				if val.as_ref().map(|v| &v.1) != ret_ty.as_ref() {
