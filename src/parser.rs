@@ -280,7 +280,7 @@ impl Parser<'_> {
 		))
 	}
 	
-	pub fn parse_program(file: String, slice: &str) -> CompilerResult<Vec<NodePos>> {
+	pub fn parse_program(file: &str, slice: &str) -> CompilerResult<Vec<NodePos>> {
 		let initial_pos = Pos {
 			file: file.into(),
 			line: 1, off: 1

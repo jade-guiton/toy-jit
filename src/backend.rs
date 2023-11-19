@@ -31,6 +31,10 @@ impl Backend {
 		self.asm.get_label_idx(lbl)
 	}
 	
+	pub fn get_cur_addr(&self) -> usize {
+		self.asm.get_cur_addr()
+	}
+	
 	pub fn begin_fn(&mut self, lbl: Label, arg_slots: u16, ret_slots: u16) {
 		assert!(self.cur_fn.is_none(), "current function not finished");
 		self.asm.set_label(lbl);
@@ -56,17 +60,20 @@ impl Backend {
 		}
 	}
 	pub fn end_fn(&mut self) {
-		assert!(self.cur_fn.is_some(), "not inside function");
-		self.cur_fn = None;
+		self.cur_fn.take().expect("not inside function");
+	}
+	
+	pub fn add_breakpoint(&mut self) {
+		self.asm.op_int3(Arg::Nil, Arg::Nil);
 	}
 	
 	pub fn gen_c_entry(&mut self, lbl: Label, main_fn: Label) {
 		assert!(self.cur_fn.is_none(), "current function not finished");
-		self.asm.set_label(lbl);
-		self.asm.op_int3(Arg::Nil, Arg::Nil); // Manual breakpoint
 		
+		self.asm.set_label(lbl);
 		// Only RBP is used among "callee-saved" registers
 		self.asm.op_push(Arg::Reg(Reg::RBP), Arg::Nil);
+		self.asm.op_mov(Arg::Reg(Reg::RBP), Arg::Reg(Reg::RSP));
 		
 		self.asm.op_sub(Arg::Reg(Reg::RSP), Arg::Imm(8)); // 1 return slot
 		self.asm.op_call(Arg::Lbl(main_fn), Arg::Nil);

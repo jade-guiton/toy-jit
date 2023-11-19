@@ -1,11 +1,11 @@
+fn main() int {
+	ret fib(5);
+}
+
 fn fib(n int) int {
 	if n <= 1 {
 		ret n;
 	} else {
 		ret fib(n - 2) + fib(n - 1);
 	}
-}
-
-fn main() int {
-	ret fib(11);
 }

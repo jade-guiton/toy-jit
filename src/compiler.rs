@@ -8,7 +8,7 @@ use crate::{
 	asm::Label,
 	ast::{Node, NodePos, CompilationError, at, CompilerResult, BinCompOp, FnDecl, Pos},
 	mmap::ExecBox,
-	format_err_nowhere, format_err
+	format_err_nowhere, format_err, gdb::SymFile
 };
 
 #[derive(Clone, Debug)]
@@ -114,12 +114,14 @@ impl Scope {
 
 pub struct CompilerOutput {
 	_mem: ExecBox,
-	pub entry: extern "sysv64" fn() -> i32
+	pub entry: extern "sysv64" fn() -> i32,
+	pub symbols: Box<[u8]>
 }
 
 pub struct Compiler {
 	back: Backend,
 	globals: Rc<RefCell<Scope>>,
+	sym_file: SymFile,
 }
 
 impl Compiler {
@@ -127,6 +129,7 @@ impl Compiler {
 		Compiler {
 			back: Backend::new(),
 			globals: Scope::new(None, false),
+			sym_file: SymFile::new()
 		}
 	}
 	
@@ -148,7 +151,12 @@ impl Compiler {
 		};
 		
 		let entry_lbl = self.back.new_label();
+		let entry_addr = self.back.get_cur_addr();
 		self.back.gen_c_entry(entry_lbl, main_lbl);
+		
+		self.sym_file.new_file("<entry>");
+		self.sym_file.new_fn("<entry>", entry_addr, self.back.get_cur_addr());
+		
 		let entry_off = self.back.get_label_offset(entry_lbl);
 		
 		let mem = self.back.finalize();
@@ -157,7 +165,7 @@ impl Compiler {
 			std::mem::transmute(mem.get_off(entry_off))
 		};
 		
-		Ok(CompilerOutput { _mem: mem, entry })
+		Ok(CompilerOutput { _mem: mem, entry, symbols: self.sym_file.into_bytes() })
 	}
 	
 	fn resolve_ty(&self, node: &Node) -> Type {
@@ -278,16 +286,12 @@ impl Compiler {
 				for (cond, block) in if_br {
 					let next = self.back.new_label();
 					self.compile_branch(cond, sc, next, true)?;
-					for instr in block {
-						self.compile_stat(instr, sc, ret_ty)?;
-					}
+					self.compile_block(block, sc, ret_ty)?;
 					self.back.jmp(end);
 					self.back.set_label(next);
 				}
 				if let Some(block) = else_br {
-					for instr in block {
-						self.compile_stat(instr, sc, ret_ty)?;
-					}
+					self.compile_block(block, sc, ret_ty)?;
 				}
 				self.back.set_label(end);
 				Ok(())
@@ -333,6 +337,14 @@ impl Compiler {
 		Ok(())
 	}
 	
+	fn compile_block(&mut self, block: &[NodePos], sc: &mut Scope, ret_ty: &Option<Type>) -> CompilerResult<()> {
+		for stat in block {
+			self.sym_file.map_line(stat.1.line, self.back.get_cur_addr());
+			self.compile_stat(stat, sc, ret_ty)?;
+		}
+		Ok(())
+	}
+	
 	pub fn compile_fn(&mut self, fn_decl: &FnDecl, pos: &Pos) -> CompilerResult<()> {
 		let fn_val = self.globals.borrow().find(&fn_decl.name).expect("function not declared before compilation");
 		let (args_ty, ret_ty, fn_lbl) =
@@ -348,12 +360,21 @@ impl Compiler {
 		let fn_scope = Scope::new(Some(arg_scope), true);
 		
 		let ret_slots = if ret_ty.is_some() { 1 } else { 0 };
+		
+		let start_addr = self.back.get_cur_addr();
+		self.sym_file.map_line(pos.line, start_addr);
+		
 		self.back.begin_fn(fn_lbl, at(fn_decl.args.len().try_into(), pos.clone())?, ret_slots);
-		for stat in &fn_decl.body {
-			self.compile_stat(stat, &mut fn_scope.borrow_mut(), &ret_ty)?;
+		if fn_decl.name == "main" {
+			self.back.add_breakpoint();
 		}
+		self.compile_block(&fn_decl.body, &mut fn_scope.borrow_mut(), &ret_ty)?;
 		self.back.ret(); // Just in case
 		self.back.end_fn();
+		
+		let end_addr = self.back.get_cur_addr();
+		self.sym_file.new_fn(&fn_decl.name, start_addr, end_addr);
+		
 		Ok(())
 	}
 	
@@ -373,14 +394,16 @@ impl Compiler {
 		}
 	}
 	
-	pub fn compile_program(ast: &[NodePos]) -> CompilerResult<CompilerOutput> {
+	pub fn compile_program(file_name: &str, ast: &[NodePos]) -> CompilerResult<CompilerOutput> {
 		let mut comp = Compiler::new();
 		for decl in ast {
 			comp.declare(decl)?;
 		}
+		comp.sym_file.new_file(file_name);
 		for decl in ast {
 			comp.define(decl)?;
 		}
+		comp.sym_file.end_file();
 		comp.finalize()
 	}
 }

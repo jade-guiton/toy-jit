@@ -46,6 +46,10 @@ impl MmapVec {
 		self.len
 	}
 	
+	pub fn get_end_addr(&self) -> usize {
+		self.ptr as usize + self.len
+	}
+	
 	fn grow(&mut self) {
 		let new_size = self.cap + self.page_size;
 		let new_ptr = unsafe { mremap(self.ptr, self.cap, new_size, MRemapFlags::MREMAP_MAYMOVE, None) }.unwrap();

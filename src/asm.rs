@@ -40,6 +40,10 @@ impl Assembler {
 		}
 	}
 	
+	pub fn get_cur_addr(&self) -> usize {
+		self.buf.get_end_addr()
+	}
+	
 	pub fn finalize(self) -> ExecBox {
 		for lbl_st in &self.labels {
 			if let LabelState::Forward(refs) = lbl_st {

@@ -1,4 +1,5 @@
 use compiler::Compiler;
+use gdb::register_symbols;
 use parser::Parser;
 
 mod mmap;
@@ -7,6 +8,7 @@ mod backend;
 mod compiler;
 mod ast;
 mod parser;
+mod gdb;
 
 extern fn nop(_: nix::libc::c_int) {}
 
@@ -32,7 +34,7 @@ fn main() {
 		}
 	};
 	
-	let ast = match Parser::parse_program(path, &file) {
+	let ast = match Parser::parse_program(&path, &file) {
 		Ok(ast) => ast,
 		Err(err) => {
 			eprintln!("syntax error: {}", err);
@@ -40,13 +42,14 @@ fn main() {
 		}
 	};
 	
-	let code = match Compiler::compile_program(&ast) {
+	let code = match Compiler::compile_program(&path, &ast) {
 		Ok(code) => code,
 		Err(err) => {
 			eprintln!("compilation error: {}", err);
 			std::process::exit(1);
 		}
 	};
+	register_symbols(&code.symbols);
 	
 	let res = (code.entry)();
 	
