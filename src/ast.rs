@@ -55,8 +55,15 @@ pub enum Node {
 		if_br: Vec<(NodePos, Block)>,
 		else_br: Option<Block>,
 	},
-	Ret(Option<Box<NodePos>>),
+	While(Box<NodePos>, Block),
+	Let {
+		name: InlinableString,
+		ty: Option<Box<Node>>,
+		expr: Option<Box<NodePos>>,
+	},
+	Set(Box<NodePos>, Box<NodePos>),
 	ExprStat(Box<NodePos>),
+	Ret(Option<Box<NodePos>>),
 	Call {
 		func: Box<NodePos>,
 		args: Vec<NodePos>,
@@ -99,15 +106,27 @@ impl std::fmt::Display for CompilationError {
 }
 
 #[macro_export]
+macro_rules! format_err_raw {
+	($pos:expr, $($arg:tt)*) => {{
+		crate::ast::CompilationError::at($pos.clone(), format!($($arg)*))
+	}};
+}
+#[macro_export]
 macro_rules! format_err {
 	($pos:expr, $($arg:tt)*) => {{
-		Err(CompilationError::at($pos.clone(), format!($($arg)*)))
+		Err(crate::format_err_raw!($pos, $($arg)*))
+	}};
+}
+#[macro_export]
+macro_rules! format_err_nowhere_raw {
+	($($arg:tt)*) => {{
+		crate::ast::CompilationError::nowhere(format!($($arg)*))
 	}};
 }
 #[macro_export]
 macro_rules! format_err_nowhere {
 	($($arg:tt)*) => {{
-		Err(CompilationError::nowhere(format!($($arg)*)))
+		Err(crate::format_err_nowhere_raw!($($arg)*))
 	}};
 }
 

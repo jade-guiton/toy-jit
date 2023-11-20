@@ -146,10 +146,7 @@ fn main() {
 						Arg::Reg64 => write!(out, "Arg::Reg(reg)").unwrap(),
 						Arg::Mem64 | Arg::RegOrMem64 if i < 2 => match i {
 							0 => write!(out, "Arg::IndReg(rm, off)").unwrap(),
-							1 => {
-								write!(out, "Arg::Lbl(lbl)").unwrap();
-								imm = Some(Arg::Rel32);
-							},
+							1 => write!(out, "Arg::Lbl(lbl)").unwrap(),
 							_ => unreachable!()
 						},
 						Arg::RegOrMem64 if i == 2 => write!(out, "Arg::Reg(rm)").unwrap(),
@@ -199,17 +196,22 @@ fn main() {
 						_ => unreachable!(),
 					}
 					write!(out, "        self.buf.push_u8(modrm(mode, reg as u8, rm as u8));\n").unwrap();
-					if i == 0 {
-						write!(out, "        if mode == 0b01 {{\n").unwrap();
-						write!(out, "          self.buf.push_i8(off as i8);\n").unwrap();
-						write!(out, "        }} else if mode == 0b10 {{\n").unwrap();
-						write!(out, "          self.buf.push_i32(off);\n").unwrap();
-						write!(out, "        }}\n").unwrap();
-						write!(out, "        if rm == Reg::RSP {{\n").unwrap();
-						write!(out, "          self.buf.push_u8(sib(0, Reg::RSP as u8, rm as u8));\n").unwrap();
-						write!(out, "        }}\n").unwrap();
+					match i {
+						0 => { // IndReg
+							write!(out, "        if mode == 0b01 {{\n").unwrap();
+							write!(out, "          self.buf.push_i8(off as i8);\n").unwrap();
+							write!(out, "        }} else if mode == 0b10 {{\n").unwrap();
+							write!(out, "          self.buf.push_i32(off);\n").unwrap();
+							write!(out, "        }}\n").unwrap();
+							write!(out, "        if rm == Reg::RSP {{\n").unwrap();
+							write!(out, "          self.buf.push_u8(sib(0, Reg::RSP as u8, rm as u8));\n").unwrap();
+							write!(out, "        }}\n").unwrap();
+						},
+						1 => { // Lbl,
+							write!(out, "        self.push_label_rel32(lbl);\n").unwrap();
+						},
+						_ => {},
 					}
-					// (Lbl has its displacement handled by the code below)
 				}
 				
 				match imm {

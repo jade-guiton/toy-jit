@@ -83,10 +83,16 @@ impl Backend {
 		self.asm.op_ret(Arg::Nil, Arg::Nil);
 	}
 	
-	pub fn alloc_locals(&mut self, slots: u32) {
+	pub fn new_undefined_local(&mut self, slots: u32) {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
-		assert!(fn_state.temp_slots == 0, "can't allocate locals with temporaries on stack");
+		assert!(fn_state.temp_slots == 0, "can't allocate local with temporaries on stack");
 		self.asm.op_sub(Arg::Reg(Reg::RSP), Arg::Imm(slots as i64 * 8));
+		fn_state.local_slots += slots;
+	}
+	pub fn new_local(&mut self, slots: u32) {
+		let fn_state = self.cur_fn.as_mut().expect("not inside function");
+		assert!(fn_state.temp_slots == slots, "not enough temporaries to turn into local");
+		fn_state.temp_slots = 0;
 		fn_state.local_slots += slots;
 	}
 	pub fn drop_locals(&mut self, slots: u32) {
@@ -107,7 +113,7 @@ impl Backend {
 	pub fn push_local(&mut self, slot_idx: u32) {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
 		assert!(slot_idx < fn_state.local_slots, "invalid local slot index");
-		self.asm.op_push(Arg::IndReg(Reg::RBP, -8 * (slot_idx as i32)), Arg::Nil);
+		self.asm.op_push(Arg::IndReg(Reg::RBP, (slot_idx + 1) as i32 * -8), Arg::Nil);
 		fn_state.temp_slots += 1;
 	}
 	pub fn push_imm(&mut self, val: i64) {
@@ -132,7 +138,7 @@ impl Backend {
 		let fn_state = self.cur_fn.as_mut().expect("not inside function");
 		assert!(slot_idx < fn_state.local_slots, "invalid local slot index");
 		assert!(fn_state.temp_slots > 0, "no temporaries to pop");
-		self.asm.op_pop(Arg::IndReg(Reg::RBP, -8 * (slot_idx as i32)), Arg::Nil);
+		self.asm.op_pop(Arg::IndReg(Reg::RBP, (slot_idx + 1) as i32 * -8), Arg::Nil);
 		fn_state.temp_slots -= 1;
 	}
 	pub fn pop_ret(&mut self, slot_idx: u16) {

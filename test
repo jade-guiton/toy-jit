@@ -1,11 +1,24 @@
 fn main() int {
-	ret fib(5);
+	ret fib_iter(11);
 }
 
-fn fib(n int) int {
+fn fib_rec(n int) int {
 	if n <= 1 {
 		ret n;
 	} else {
-		ret fib(n - 2) + fib(n - 1);
+		ret fib_rec(n - 2) + fib_rec(n - 1);
 	}
+}
+
+fn fib_iter(n int) int {
+	let i = 1;
+	let a = 0;
+	let b = 1;
+	while i < n {
+		let c = a + b;
+		a = b;
+		b = c;
+		i = i + 1;
+	}
+	ret b;
 }

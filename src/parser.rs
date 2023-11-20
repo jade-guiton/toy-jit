@@ -2,7 +2,13 @@ use inlinable_string::InlinableString;
 use num_enum::TryFromPrimitive;
 use unicode_xid::UnicodeXID;
 
-use crate::{ast::{CompilationError, CompilerResult, Node, Pos, NodePos, Block, BinCompOp, BinArithOp, FnDecl}, format_err};
+use crate::{
+	ast::{
+		CompilationError, CompilerResult, Node, Pos,
+		NodePos, Block, BinCompOp, BinArithOp, FnDecl
+	},
+	format_err
+};
 
 pub struct Parser<'a> {
 	rest: &'a str,
@@ -37,10 +43,11 @@ impl Parser<'_> {
 	}
 }
 
-const KEYWORDS: [&'static str; 6] = [
+const KEYWORDS: [&'static str; 8] = [
 	"int", "bool",
 	"fn", "ret",
-	"if", "else",
+	"if", "else", "while",
+	"let",
 ];
 
 impl Parser<'_> {
@@ -83,7 +90,7 @@ impl Parser<'_> {
 					let slice = &self.rest[..1];
 					self.advance_char();
 					Node::Sym(InlinableString::from(slice))
-				} else if "<>".contains(c) {
+				} else if "<>=".contains(c) {
 					let s = self.rest;
 					let mut slice = &s[..1];
 					self.advance_char();
@@ -163,17 +170,34 @@ enum OpPrec {
 }
 
 impl Parser<'_> {
+	fn parse_bin_comp_op(&mut self) -> CompilerResult<Option<BinCompOp>> {
+		Ok(if self.check_sym("<")? {
+			Some(BinCompOp::LT)
+		} else if self.check_sym(">")? {
+			Some(BinCompOp::GT)
+		} else if self.check_sym("<=")? {
+			Some(BinCompOp::LE)
+		} else if self.check_sym(">=")? {
+			Some(BinCompOp::GE)
+		} else {
+			None
+		})
+	}
 	fn parse_expr_prec(&mut self, min_prec: OpPrec) -> CompilerResult<NodePos> {
 		let mut cur = self.parse_prim_expr()?;
 		loop {
 			let op_pos = self.next_token_pos.clone();
-			if min_prec <= OpPrec::Comp && self.check_sym("<=")? {
-				let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Comp as u32 + 1).unwrap())?;
-				cur = NodePos(
-					Node::BinComp(BinCompOp::LE, Box::new(cur), Box::new(rhs)),
-					op_pos,
-				);
-			} else if min_prec <= OpPrec::Plus && self.check_sym("+")? {
+			if min_prec <= OpPrec::Comp {
+				if let Some(op) = self.parse_bin_comp_op()? {
+					let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Comp as u32 + 1).unwrap())?;
+					cur = NodePos(
+						Node::BinComp(op, Box::new(cur), Box::new(rhs)),
+						op_pos,
+					);
+					continue;
+				}
+			}
+			if min_prec <= OpPrec::Plus && self.check_sym("+")? {
 				let rhs = self.parse_expr_prec(OpPrec::try_from(OpPrec::Plus as u32 + 1).unwrap())?;
 				cur = NodePos(
 					Node::BinArith(BinArithOp::Plus, Box::new(cur), Box::new(rhs)),
@@ -211,7 +235,23 @@ impl Parser<'_> {
 	
 	fn parse_instr(&mut self) -> CompilerResult<NodePos> {
 		let pos = self.next_token_pos.clone();
-		if self.check_sym("ret")? {
+		if self.check_sym("let")? {
+			let name = if let Node::Id(id) = &self.next_token { id } else {
+				return format_err!(pos, "expected identifier");
+			}.clone();
+			self.advance_token()?;
+			let mut ty = None;
+			if !self.check_sym("=")? {
+				ty = Some(Box::new(self.parse_ty()?));
+				self.expect_sym("=")?;
+			}
+			let mut expr = None;
+			if !self.check_sym(";")? {
+				expr = Some(Box::new(self.parse_expr()?));
+				self.expect_sym(";")?;
+			}
+			Ok(NodePos(Node::Let { name, ty, expr }, pos))
+		} else if self.check_sym("ret")? {
 			let mut exp = None;
 			if !self.check_sym(";")? {
 				exp = Some(Box::new(self.parse_expr()?));
@@ -239,8 +279,24 @@ impl Parser<'_> {
 				}
 			}
 			Ok(NodePos(Node::If { if_br, else_br }, pos))
+		} else if self.check_sym("while")? {
+			let cond = self.parse_expr()?;
+			self.expect_sym("{")?;
+			let body = self.parse_block()?;
+			Ok(NodePos(Node::While(Box::new(cond), body), pos))
 		} else {
 			let expr = self.parse_expr()?;
+			match expr.0 {
+				Node::Id(_) => {
+					if self.check_sym("=")? {
+						let rhs = self.parse_expr()?;
+						self.expect_sym(";")?;
+						return Ok(NodePos(Node::Set(Box::new(expr), Box::new(rhs)), pos));
+					}
+				},
+				Node::Call { .. } => {},
+				_ => format_err!(pos, "expected instruction")?,
+			}
 			self.expect_sym(";")?;
 			Ok(NodePos(Node::ExprStat(Box::new(expr)), pos))
 		}

@@ -9,6 +9,7 @@ mod compiler;
 mod ast;
 mod parser;
 mod gdb;
+mod util;
 
 extern fn nop(_: nix::libc::c_int) {}
 
