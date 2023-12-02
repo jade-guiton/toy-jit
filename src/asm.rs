@@ -1,6 +1,9 @@
 use crate::mmap::{MmapVec, ExecBox};
 
-pub type Label = usize;
+#[derive(Clone, Copy, Debug)]
+pub struct Label {
+	id: usize
+}
 
 enum LabelState {
 	Forward(Vec<usize>),
@@ -12,6 +15,7 @@ pub struct Assembler {
 }
 
 #[allow(dead_code)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reg {
 	RAX = 0, RCX, RDX, RBX, RSP, RBP, RSI, RDI
@@ -33,7 +37,7 @@ impl Assembler {
 	}
 	
 	pub fn get_label_idx(&self, lbl: Label) -> usize {
-		if let LabelState::Defined(idx) = self.labels[lbl] {
+		if let LabelState::Defined(idx) = self.labels[lbl.id] {
 			idx
 		} else {
 			panic!("trying to locate undefined assembler label");
@@ -54,7 +58,7 @@ impl Assembler {
 	}
 	
 	pub fn new_label(&mut self) -> Label {
-		let lbl = self.labels.len() as Label;
+		let lbl = Label { id: self.labels.len() };
 		self.labels.push(LabelState::Forward(vec![]));
 		lbl
 	}
@@ -72,23 +76,23 @@ impl Assembler {
 	fn push_label_rel32(&mut self, lbl: Label) {
 		let at = self.buf.len();
 		self.buf.push_i32(0); // placeholder
-		if let LabelState::Forward(refs) = &mut self.labels[lbl] {
+		if let LabelState::Forward(refs) = &mut self.labels[lbl.id] {
 			refs.push(at);
-		} else if let LabelState::Defined(to) = &self.labels[lbl] {
+		} else if let LabelState::Defined(to) = &self.labels[lbl.id] {
 			self.write_rel32(at, *to);
 		}
 	}
 	
 	pub fn set_label(&mut self, lbl: Label) {
 		let to = self.buf.len();
-		if let LabelState::Forward(refs) = &self.labels[lbl] {
+		if let LabelState::Forward(refs) = &self.labels[lbl.id] {
 			for at in refs.clone() {
 				self.write_rel32(at, to);
 			}
 		} else {
 			panic!("assembly label defined twice");
 		}
-		self.labels[lbl] = LabelState::Defined(to);
+		self.labels[lbl.id] = LabelState::Defined(to);
 	}
 }
 
